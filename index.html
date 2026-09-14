@@ -1,225 +1,313 @@
-<script>
-    const PROFILES_API_URL = "https://8gb4zbvmdh.execute-api.us-east-1.amazonaws.com/profiles";
-    let profiles = [];
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fyers v3 Secure Login Tool</title>
+    <!-- Tailwind CSS CDN for responsive UI -->
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen flex flex-col items-center justify-center p-4">
 
-    window.onload = function() {
-        try {
-            const savedProfiles = sessionStorage.getItem('fyers_cached_profiles');
-            if (savedProfiles) {
-                profiles = JSON.parse(savedProfiles);
-                document.getElementById('passcodeModal').classList.add('hidden');
-                populateDropdown();
-                logMessage("Loaded profiles from secure session.");
-            } else {
-                logMessage("Awaiting security verification...");
-            }
-        } catch (e) {
-            logMessage("Init note: " + e.message);
-        }
-    };
-
-    async function verifyAndLoadProfiles() {
-        const passcodeField = document.getElementById('passcodeInput');
-        const errDiv = document.getElementById('passcodeError');
-        if (!passcodeField) return;
-        const passcode = passcodeField.value.trim();
+    <!-- Main Dashboard Container -->
+    <div class="w-full max-w-xl bg-slate-800 border border-slate-700 rounded-xl shadow-2xl p-6 space-y-6">
         
-        if (!passcode) {
-            errDiv.textContent = "Passcode cannot be empty!";
-            errDiv.classList.remove('hidden');
-            return;
-        }
+        <!-- Header -->
+        <div class="border-b border-slate-700 pb-4 flex justify-between items-center">
+            <div>
+                <h1 class="text-xl font-bold text-orange-400">Fyers v3 Login Tool</h1>
+                <p class="text-xs text-slate-400 mt-1">Cross-Platform Authentication Utility</p>
+            </div>
+            <button onclick="resetSession()" class="bg-slate-700 hover:bg-slate-600 px-3 py-1.5 rounded text-xs font-semibold transition text-orange-300">Reset Session</button>
+        </div>
 
-        errDiv.classList.add('hidden');
-        logMessage("Authenticating with AWS backend...");
+        <!-- Main Form Group -->
+        <div class="space-y-4">
+            <!-- User Selection Dropdown -->
+            <div>
+                <label class="block text-sm font-medium text-slate-300 mb-1">Select User Profile</label>
+                <select id="userSelect" onchange="onUserChange()" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-orange-500 outline-none">
+                    <option value="">-- Choose User --</option>
+                </select>
+            </div>
 
-        try {
-            const response = await fetch(`${PROFILES_API_URL}?passcode=${encodeURIComponent(passcode)}`, {
-                method: 'GET',
-                headers: { 'Accept': 'application/json' }
-            });
+            <!-- Profile details display -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs bg-slate-900/50 p-3 rounded-lg border border-slate-700/50">
+                <div><span class="text-slate-400">App ID:</span> <span id="lblClientId" class="font-mono text-orange-300">-</span></div>
+                <div><span class="text-slate-400">App Hash ID:</span> <span id="lblHashId" class="font-mono text-orange-300">-</span></div>
+                <div class="sm:col-span-2 truncate"><span class="text-slate-400">Redirect URL:</span> <span id="lblRedirectUrl" class="font-mono text-slate-300">-</span></div>
+            </div>
 
-            if (response.status === 401) {
-                errDiv.textContent = "Unauthorized: Incorrect passcode!";
+            <!-- Step 1: Generate Auth URL -->
+            <div>
+                <button onclick="generateAuthUrl()" class="w-full bg-blue-600 hover:bg-blue-500 font-medium py-2.5 px-4 rounded-lg text-sm transition shadow-md flex items-center justify-center space-x-2">
+                    <span>1. Open Fyers Login & Get Code</span>
+                </button>
+            </div>
+
+            <!-- Step 2: Paste Redirect URL / Auth Code -->
+            <div>
+                <label class="block text-sm font-medium text-slate-300 mb-1">Paste Redirect URL / Auth Code Here</label>
+                <textarea id="redirectUrlInput" rows="3" placeholder="Paste the full redirect URL or auth code here after logging in..." class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-xs font-mono focus:ring-2 focus:ring-orange-500 outline-none"></textarea>
+            </div>
+
+            <!-- Checkbox for Cloud Sync -->
+            <div class="flex items-center space-x-2">
+                <input type="checkbox" id="syncCloudCheck" checked class="w-4 h-4 text-orange-500 bg-slate-900 border-slate-700 rounded focus:ring-orange-500">
+                <label for="syncCloudCheck" class="text-xs font-medium text-slate-300">Sync Access Token to AWS Cloud Gateway</label>
+            </div>
+
+            <!-- Step 2 Action Button -->
+            <div>
+                <button onclick="validateAuthCode()" class="w-full bg-orange-600 hover:bg-orange-500 font-medium py-2.5 px-4 rounded-lg text-sm transition shadow-md">
+                    2. Validate & Generate Access Token
+                </button>
+            </div>
+        </div>
+
+        <!-- Output Log Box -->
+        <div class="space-y-1">
+            <label class="block text-xs font-medium text-slate-400">Execution Status / Token Output</label>
+            <pre id="outputLog" class="w-full bg-black/60 border border-slate-700 rounded-lg p-3 text-xs font-mono text-green-400 h-28 overflow-y-auto whitespace-pre-wrap"></pre>
+        </div>
+    </div>
+
+    <!-- Security & Setup Modal -->
+    <div id="passcodeModal" class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
+        <div class="bg-slate-800 border border-slate-700 rounded-xl max-w-sm w-full p-6 space-y-4 shadow-2xl">
+            <h3 class="font-bold text-base text-orange-400">Security Verification</h3>
+            <p class="text-xs text-slate-300">Please enter your security passcode to load user profiles. This will be stored in session memory only.</p>
+            <input type="password" id="passcodeInput" placeholder="Enter Passcode..." class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-xs font-mono focus:ring-2 focus:ring-orange-500 outline-none" onkeydown="if(event.key === 'Enter') verifyAndLoadProfiles()">
+            <div id="passcodeError" class="text-xs text-red-400 hidden">Invalid or missing passcode!</div>
+            <div class="flex justify-end space-x-2 pt-2">
+                <button onclick="verifyAndLoadProfiles()" class="w-full bg-orange-600 hover:bg-orange-500 py-2 rounded text-xs font-semibold transition">Authenticate</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const PROFILES_API_URL = "https://8gb4zbvmdh.execute-api.us-east-1.amazonaws.com/profiles";
+        let profiles = [];
+
+        window.onload = function() {
+            try {
+                const savedProfiles = sessionStorage.getItem('fyers_cached_profiles');
+                if (savedProfiles) {
+                    profiles = JSON.parse(savedProfiles);
+                    document.getElementById('passcodeModal').classList.add('hidden');
+                    populateDropdown();
+                    logMessage("Loaded profiles from secure session.");
+                } else {
+                    logMessage("Awaiting security verification...");
+                }
+            } catch (e) {
+                logMessage("Init note: " + e.message);
+            }
+        };
+
+        async function verifyAndLoadProfiles() {
+            const passcodeField = document.getElementById('passcodeInput');
+            const errDiv = document.getElementById('passcodeError');
+            if (!passcodeField) return;
+            const passcode = passcodeField.value.trim();
+            
+            if (!passcode) {
+                errDiv.textContent = "Passcode cannot be empty!";
                 errDiv.classList.remove('hidden');
                 return;
             }
 
-            if (!response.ok) {
-                throw new Error(`Server status ${response.status}`);
-            }
+            errDiv.classList.add('hidden');
+            logMessage("Authenticating with AWS backend...");
 
-            const data = await response.json();
-            profiles = Array.isArray(data) ? data : (data.profiles || []);
-
-            sessionStorage.setItem('fyers_cached_profiles', JSON.stringify(profiles));
-            document.getElementById('passcodeModal').classList.add('hidden');
-            populateDropdown();
-            logMessage("Profiles loaded successfully from AWS DynamoDB.");
-
-        } catch (error) {
-            errDiv.textContent = `Connection error: ${error.message}`;
-            errDiv.classList.remove('hidden');
-            logMessage(`ERROR: ${error.message}`);
-        }
-    }
-
-    function populateDropdown() {
-        const select = document.getElementById('userSelect');
-        if (!select) return;
-        select.innerHTML = '<option value="">-- Choose User --</option>';
-        profiles.forEach((p, index) => {
-            const opt = document.createElement('option');
-            opt.value = index;
-            opt.textContent = (p.user_name || 'User') + ' (' + (p.app_id || '') + ')';
-            select.appendChild(opt);
-        });
-    }
-
-    function resetSession() {
-        sessionStorage.removeItem('fyers_cached_profiles');
-        location.reload();
-    }
-
-    function onUserChange() {
-        const select = document.getElementById('userSelect');
-        if (!select) return;
-        const idx = select.value;
-        
-        const clientLbl = document.getElementById('lblClientId');
-        const hashLbl = document.getElementById('lblHashId');
-        const redirectLbl = document.getElementById('lblRedirectUrl');
-
-        if (idx === "") {
-            if (clientLbl) clientLbl.textContent = "-";
-            if (hashLbl) hashLbl.textContent = "-";
-            if (redirectLbl) redirectLbl.textContent = "-";
-            return;
-        }
-        
-        const p = profiles[idx];
-        if (p) {
-            if (clientLbl) clientLbl.textContent = p.app_id || '-';
-            if (hashLbl) hashLbl.textContent = p.hash_id || '-';
-            if (redirectLbl) redirectLbl.textContent = p.redirect_url || '-';
-        }
-    }
-
-    function generateAuthUrl() {
-        const select = document.getElementById('userSelect');
-        if (!select || select.value === "") {
-            alert("Please select a user profile first!");
-            return;
-        }
-        const p = profiles[select.value];
-        if (!p) return;
-        
-        const urlString = `https://api-t1.fyers.in/api/v3/generate-authcode?client_id=${encodeURIComponent(p.app_id)}&redirect_uri=${encodeURIComponent(p.redirect_url)}&response_type=code&state=om_sai_ram&nonce=nonce`;
-        
-        logMessage(`Opening Fyers login window for ${p.user_name}...`);
-        window.open(urlString, '_blank');
-    }
-
-    async function validateAuthCode() {
-        const select = document.getElementById('userSelect');
-        if (!select || select.value === "") {
-            alert("Please select a user profile first!");
-            return;
-        }
-        const p = profiles[select.value];
-        const inputField = document.getElementById('redirectUrlInput');
-        if (!inputField) return;
-        const inputVal = inputField.value.trim();
-        
-        if (!inputVal) {
-            alert("Please paste the redirect URL or auth code first!");
-            return;
-        }
-
-        let authCode = inputVal;
-        if (inputVal.includes("auth_code=")) {
             try {
-                const urlObj = new URL(inputVal.includes("http") ? inputVal : "http://localhost?" + inputVal);
-                authCode = urlObj.searchParams.get("auth_code") || inputVal;
-            } catch(err) {
-                const match = inputVal.match(/auth_code=([^&]+)/);
-                if (match) authCode = match[1];
-            }
-        }
+                const response = await fetch(`${PROFILES_API_URL}?passcode=${encodeURIComponent(passcode)}`, {
+                    method: 'GET',
+                    headers: { 'Accept': 'application/json' }
+                });
 
-        logMessage("Validating auth code with Fyers v3 API...");
-
-        const payload = {
-            grant_type: "authorization_code",
-            appIdHash: p.hash_id.trim(),
-            code: authCode.trim()
-        };
-
-        try {
-            const response = await fetch('https://api-t1.fyers.in/api/v3/validate-authcode', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
-
-            const data = await response.json();
-            
-            if (data.s === "ok" || data.access_token) {
-                const accessToken = data.access_token;
-                logMessage(`SUCCESS: Access Token generated for ${p.user_name}!\nToken: ${accessToken.substring(0, 20)}...`);
-
-                const syncCheck = document.getElementById('syncCloudCheck');
-                if (syncCheck && syncCheck.checked) {
-                    // Uses the token_sync_api_url fetched directly from DynamoDB for this specific user
-                    await syncTokenToCloud(p, accessToken);
+                if (response.status === 401) {
+                    errDiv.textContent = "Unauthorized: Incorrect passcode!";
+                    errDiv.classList.remove('hidden');
+                    return;
                 }
-            } else {
-                logMessage(`FAILURE: Fyers validation failed.\nResponse: ${JSON.stringify(data, null, 2)}`);
+
+                if (!response.ok) {
+                    throw new Error(`Server status ${response.status}`);
+                }
+
+                const data = await response.json();
+                profiles = Array.isArray(data) ? data : (data.profiles || []);
+
+                sessionStorage.setItem('fyers_cached_profiles', JSON.stringify(profiles));
+                document.getElementById('passcodeModal').classList.add('hidden');
+                populateDropdown();
+                logMessage("Profiles loaded successfully from AWS DynamoDB.");
+
+            } catch (error) {
+                errDiv.textContent = `Connection error: ${error.message}`;
+                errDiv.classList.remove('hidden');
+                logMessage(`ERROR: ${error.message}`);
             }
-
-        } catch (error) {
-            logMessage(`ERROR: Network exception during validation.\nDetails: ${error.message}`);
-        }
-    }
-
-    async function syncTokenToCloud(p, accessToken) {
-        const syncUrl = p.token_sync_api_url;
-        if (!syncUrl) {
-            logMessage("Cloud sync skipped: No token_sync_api_url defined for this profile.");
-            return;
         }
 
-        logMessage("Syncing token to profile-specific Cloud Gateway...");
-        const payload = {
-            userid: p.user_name,
-            authCode: accessToken.trim()
-        };
-
-        try {
-            const res = await fetch(syncUrl, {
-                method: 'POST',
-                headers: {
-                    'Authorization': accessToken.trim(),
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(payload)
+        function populateDropdown() {
+            const select = document.getElementById('userSelect');
+            if (!select) return;
+            select.innerHTML = '<option value="">-- Choose User --</option>';
+            profiles.forEach((p, index) => {
+                const opt = document.createElement('option');
+                opt.value = index;
+                opt.textContent = (p.user_name || 'User') + ' (' + (p.app_id || '') + ')';
+                select.appendChild(opt);
             });
-
-            if (res.ok) {
-                logMessage("Cloud token sync successful!");
-            } else {
-                logMessage("Cloud sync completed with non-200 status code.");
-            }
-        } catch (err) {
-            logMessage(`Cloud sync warning: Could not reach endpoint (${err.message}).`);
         }
-    }
 
-    function logMessage(text) {
-        const logBox = document.getElementById('outputLog');
-        if (!logBox) return;
-        const timestamp = new Date().toLocaleTimeString();
-        logBox.textContent += `[${timestamp}] ${text}\n`;
-        logBox.scrollTop = logBox.scrollHeight;
-    }
-</script>
+        function resetSession() {
+            sessionStorage.removeItem('fyers_cached_profiles');
+            location.reload();
+        }
+
+        function onUserChange() {
+            const select = document.getElementById('userSelect');
+            if (!select) return;
+            const idx = select.value;
+            
+            const clientLbl = document.getElementById('lblClientId');
+            const hashLbl = document.getElementById('lblHashId');
+            const redirectLbl = document.getElementById('lblRedirectUrl');
+
+            if (idx === "") {
+                if (clientLbl) clientLbl.textContent = "-";
+                if (hashLbl) hashLbl.textContent = "-";
+                if (redirectLbl) redirectLbl.textContent = "-";
+                return;
+            }
+            
+            const p = profiles[idx];
+            if (p) {
+                if (clientLbl) clientLbl.textContent = p.app_id || '-';
+                if (hashLbl) hashLbl.textContent = p.hash_id || '-';
+                if (redirectLbl) redirectLbl.textContent = p.redirect_url || '-';
+            }
+        }
+
+        function generateAuthUrl() {
+            const select = document.getElementById('userSelect');
+            if (!select || select.value === "") {
+                alert("Please select a user profile first!");
+                return;
+            }
+            const p = profiles[select.value];
+            if (!p) return;
+            
+            const urlString = `https://api-t1.fyers.in/api/v3/generate-authcode?client_id=${encodeURIComponent(p.app_id)}&redirect_uri=${encodeURIComponent(p.redirect_url)}&response_type=code&state=om_sai_ram&nonce=nonce`;
+            
+            logMessage(`Opening Fyers login window for ${p.user_name}...`);
+            window.open(urlString, '_blank');
+        }
+
+        async function validateAuthCode() {
+            const select = document.getElementById('userSelect');
+            if (!select || select.value === "") {
+                alert("Please select a user profile first!");
+                return;
+            }
+            const p = profiles[select.value];
+            const inputField = document.getElementById('redirectUrlInput');
+            if (!inputField) return;
+            const inputVal = inputField.value.trim();
+            
+            if (!inputVal) {
+                alert("Please paste the redirect URL or auth code first!");
+                return;
+            }
+
+            let authCode = inputVal;
+            if (inputVal.includes("auth_code=")) {
+                try {
+                    const urlObj = new URL(inputVal.includes("http") ? inputVal : "http://localhost?" + inputVal);
+                    authCode = urlObj.searchParams.get("auth_code") || inputVal;
+                } catch(err) {
+                    const match = inputVal.match(/auth_code=([^&]+)/);
+                    if (match) authCode = match[1];
+                }
+            }
+
+            logMessage("Validating auth code with Fyers v3 API...");
+
+            const payload = {
+                grant_type: "authorization_code",
+                appIdHash: p.hash_id.trim(),
+                code: authCode.trim()
+            };
+
+            try {
+                const response = await fetch('https://api-t1.fyers.in/api/v3/validate-authcode', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                const data = await response.json();
+                
+                if (data.s === "ok" || data.access_token) {
+                    const accessToken = data.access_token;
+                    logMessage(`SUCCESS: Access Token generated for ${p.user_name}!\nToken: ${accessToken.substring(0, 20)}...`);
+
+                    const syncCheck = document.getElementById('syncCloudCheck');
+                    if (syncCheck && syncCheck.checked) {
+                        await syncTokenToCloud(p, accessToken);
+                    }
+                } else {
+                    logMessage(`FAILURE: Fyers validation failed.\nResponse: ${JSON.stringify(data, null, 2)}`);
+                }
+
+            } catch (error) {
+                logMessage(`ERROR: Network exception during validation.\nDetails: ${error.message}`);
+            }
+        }
+
+        async function syncTokenToCloud(p, accessToken) {
+            const syncUrl = p.token_sync_api_url;
+            if (!syncUrl) {
+                logMessage("Cloud sync skipped: No token_sync_api_url defined for this profile.");
+                return;
+            }
+
+            logMessage("Syncing token to profile-specific Cloud Gateway...");
+            const payload = {
+                userid: p.user_name,
+                authCode: accessToken.trim()
+            };
+
+            try {
+                const res = await fetch(syncUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': accessToken.trim(),
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(payload)
+                });
+
+                if (res.ok) {
+                    logMessage("Cloud token sync successful!");
+                } else {
+                    logMessage("Cloud sync completed with non-200 status code.");
+                }
+            } catch (err) {
+                logMessage(`Cloud sync warning: Could not reach endpoint (${err.message}).`);
+            }
+        }
+
+        function logMessage(text) {
+            const logBox = document.getElementById('outputLog');
+            if (!logBox) return;
+            const timestamp = new Date().toLocaleTimeString();
+            logBox.textContent += `[${timestamp}] ${text}\n`;
+            logBox.scrollTop = logBox.scrollHeight;
+        }
+    </script>
+</body>
+</html>
