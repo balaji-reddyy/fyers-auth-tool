@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Fyers v3 Secure Login Tool</title>
+    <title>Algo Login Portal</title>
     <!-- Tailwind CSS CDN for responsive UI -->
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
@@ -15,10 +15,10 @@
         <!-- Header -->
         <div class="border-b border-slate-700 pb-4 flex justify-between items-center">
             <div>
-                <h1 class="text-xl font-bold text-orange-400">Fyers v3 Login Tool</h1>
+                <h1 class="text-xl font-bold text-orange-400">Algo Login Portal</h1>
                 <p class="text-xs text-slate-400 mt-1">Cross-Platform Authentication Utility</p>
             </div>
-            <button onclick="resetSession()" class="bg-slate-700 hover:bg-slate-600 px-3 py-1.5 rounded text-xs font-semibold transition text-orange-300">Reset Session</button>
+            <button onclick="resetSession()" class="bg-slate-700 hover:bg-slate-600 px-3 py-1.5 rounded text-xs font-semibold transition text-orange-300">Signout</button>
         </div>
 
         <!-- Main Form Group -->
@@ -72,7 +72,7 @@
         </div>
     </div>
 
-    <!-- Security & Setup Modal (Solid Opaque Background to block underlying content) -->
+    <!-- Security & Setup Modal (Solid Opaque Background) -->
     <div id="passcodeModal" class="fixed inset-0 bg-slate-950 flex items-center justify-center p-4 z-50">
         <div class="bg-slate-900 border border-slate-700 rounded-xl max-w-sm w-full p-6 space-y-4 shadow-2xl">
             <h3 class="font-bold text-base text-orange-400">Security Verification</h3>
