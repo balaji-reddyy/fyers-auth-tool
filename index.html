@@ -274,7 +274,6 @@
                     const accessToken = data.access_token.trim();
                     temporaryAuthToken = accessToken;
                     
-                    // Detailed diagnostic log
                     logMessage(`[Stage 1: Fyers Auth] 🟢 SUCCESS for ${p.user_name}`);
                     logMessage(`   ↳ Generated Token: ${accessToken}`);
 
@@ -301,9 +300,11 @@
             }
 
             logMessage("[Stage 2] Pushing token to Cloud Gateway (Opaque Request)...");
+            
+            // Updated payload to use 'token' parameter matching cloud sync API
             const payload = {
                 userid: p.user_name,
-                auth_token: accessToken
+                token: accessToken
             };
 
             logMessage(`   ↳ Pushing Payload to ${syncUrl}: ${JSON.stringify(payload)}`);
@@ -320,7 +321,6 @@
                 logMessage("[Timing] Waiting 5 seconds before executing Audit verification...");
                 await delay(5000);
                 
-                // Prompt securely for audit passcode using masked modal
                 pendingAuditProfile = p;
                 document.getElementById('auditPasscodeInput').value = "";
                 document.getElementById('auditPasscodeError').classList.add('hidden');
@@ -378,7 +378,7 @@
                 if (storedToken === expectedToken) {
                     logMessage(`[Stage 3: Cloud Audit] 🟢 SUCCESS! Token verified against DynamoDB.`);
                     logMessage(`✨ [COMPLETE] Authentication & Cloud Sync successfully finished for ${p.user_name}!`);
-                    temporaryAuthToken = null; // Clear volatile memory token after verification
+                    temporaryAuthToken = null; 
                 } else {
                     logMessage(`[Stage 3: Cloud Audit] 🔴 MISMATCH! Stored token does not match generated token.`);
                 }
