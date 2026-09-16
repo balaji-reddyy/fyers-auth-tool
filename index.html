@@ -68,7 +68,7 @@
         <!-- Output Log Box -->
         <div class="space-y-1">
             <label class="block text-xs font-medium text-slate-400">Execution Status / Token Output</label>
-            <pre id="outputLog" class="w-full bg-black/60 border border-slate-700 rounded-lg p-3 text-xs font-mono text-green-400 h-28 overflow-y-auto whitespace-pre-wrap"></pre>
+            <pre id="outputLog" class="w-full bg-black/60 border border-slate-700 rounded-lg p-3 text-xs font-mono text-green-400 h-36 overflow-y-auto whitespace-pre-wrap"></pre>
         </div>
     </div>
 
@@ -85,10 +85,27 @@
         </div>
     </div>
 
+    <!-- Audit Passcode Verification Modal (Masked Password Input) -->
+    <div id="auditPasscodeModal" class="fixed inset-0 bg-slate-950/80 flex items-center justify-center p-4 z-50 hidden">
+        <div class="bg-slate-900 border border-slate-700 rounded-xl max-w-sm w-full p-6 space-y-4 shadow-2xl">
+            <h3 class="font-bold text-base text-orange-400">Cloud Audit Verification</h3>
+            <p class="text-xs text-slate-300">Enter your security passcode to verify cloud sync audit:</p>
+            <input type="password" id="auditPasscodeInput" placeholder="Enter Passcode..." class="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-xs font-mono focus:ring-2 focus:ring-orange-500 outline-none" onkeydown="if(event.key === 'Enter') confirmAuditSync()">
+            <div id="auditPasscodeError" class="text-xs text-red-400 hidden">Passcode cannot be empty!</div>
+            <div class="flex justify-end space-x-2 pt-2">
+                <button onclick="cancelAuditSync()" class="w-1/2 bg-slate-700 hover:bg-slate-600 py-2 rounded text-xs font-semibold transition">Cancel</button>
+                <button onclick="confirmAuditSync()" class="w-1/2 bg-orange-600 hover:bg-orange-500 py-2 rounded text-xs font-semibold transition">Verify Audit</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         const PROFILES_API_URL = "https://8gb4zbvmdh.execute-api.us-east-1.amazonaws.com/profiles";
         let profiles = [];
-        let temporaryAuthToken = null; // Volatile memory storage for verification comparison
+        let temporaryAuthToken = null; 
+        let pendingAuditProfile = null;
+
+        const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
         window.onload = function() {
             try {
@@ -256,18 +273,20 @@
                 if (data.s === "ok" || data.access_token) {
                     const accessToken = data.access_token;
                     temporaryAuthToken = accessToken.trim();
-                    logMessage(`[Stage 1: Fyers Auth] SUCCESS for ${p.user_name}!\nToken: ${accessToken.substring(0, 10)}...${accessToken.substring(accessToken.length - 4)}`);
+                    logMessage(`[Stage 1: Fyers Auth] 🟢 SUCCESS for ${p.user_name}!\nToken: ${accessToken.substring(0, 10)}...${accessToken.substring(accessToken.length - 4)}`);
 
                     const syncCheck = document.getElementById('syncCloudCheck');
                     if (syncCheck && syncCheck.checked) {
+                        logMessage("[Timing] Waiting 4 seconds before cloud synchronization...");
+                        await delay(4000);
                         await syncTokenToCloud(p, temporaryAuthToken);
                     }
                 } else {
-                    logMessage(`[Stage 1: Fyers Auth] FAILURE.\nResponse: ${JSON.stringify(data, null, 2)}`);
+                    logMessage(`[Stage 1: Fyers Auth] 🔴 FAILURE.\nResponse: ${JSON.stringify(data, null, 2)}`);
                 }
 
             } catch (error) {
-                logMessage(`[Stage 1: Fyers Auth] ERROR: ${error.message}`);
+                logMessage(`[Stage 1: Fyers Auth] 🔴 ERROR: ${error.message}`);
             }
         }
 
@@ -285,7 +304,6 @@
             };
 
             try {
-                // Fire-and-forget opaque sync request to bypass browser CORS limits
                 await fetch(syncUrl, {
                     method: 'POST',
                     mode: 'no-cors',
@@ -293,17 +311,48 @@
                     body: JSON.stringify(payload)
                 });
 
-                logMessage("[Stage 2: Cloud Push] Completed. Executing Audit Verification...");
-                await auditCloudSync(p, accessToken);
+                logMessage("[Stage 2: Cloud Push] 🟢 Completed.");
+                logMessage("[Timing] Waiting 5 seconds before executing Audit verification...");
+                await delay(5000);
+                
+                // Prompt securely for audit passcode using masked modal
+                pendingAuditProfile = p;
+                document.getElementById('auditPasscodeInput').value = "";
+                document.getElementById('auditPasscodeError').classList.add('hidden');
+                document.getElementById('auditPasscodeModal').classList.remove('hidden');
+                document.getElementById('auditPasscodeInput').focus();
 
             } catch (err) {
-                logMessage(`[Stage 2: Cloud Sync] Warning: ${err.message}`);
+                logMessage(`[Stage 2: Cloud Sync] 🔴 Warning: ${err.message}`);
             }
         }
 
-        async function auditCloudSync(p, expectedToken) {
-            const passcode = prompt("Enter security passcode to verify cloud sync audit:") || "OmSaiRam2026";
+        function cancelAuditSync() {
+            document.getElementById('auditPasscodeModal').classList.add('hidden');
+            pendingAuditProfile = null;
+            logMessage("[Stage 3: Cloud Audit] Cancelled by user.");
+        }
+
+        async function confirmAuditSync() {
+            const passcodeField = document.getElementById('auditPasscodeInput');
+            const errDiv = document.getElementById('auditPasscodeError');
+            if (!passcodeField || !pendingAuditProfile) return;
+            const passcode = passcodeField.value.trim();
+
+            if (!passcode) {
+                errDiv.textContent = "Passcode cannot be empty!";
+                errDiv.classList.remove('hidden');
+                return;
+            }
+
+            errDiv.classList.add('hidden');
+            document.getElementById('auditPasscodeModal').classList.add('hidden');
+
+            const p = pendingAuditProfile;
+            const expectedToken = temporaryAuthToken;
             const auditUrl = `${PROFILES_API_URL}?passcode=${encodeURIComponent(passcode)}&req_type=audit&user_name=${encodeURIComponent(p.user_name)}`;
+
+            logMessage("[Stage 3] Executing Audit Verification against DynamoDB...");
 
             try {
                 const res = await fetch(auditUrl, {
@@ -317,15 +366,16 @@
                 const storedToken = auditData.stored_token ? auditData.stored_token.trim() : "";
 
                 if (storedToken === expectedToken) {
-                    logMessage(`[Stage 3: Cloud Audit] SUCCESS! Token verified against DynamoDB.`);
-                    alert(`Authentication & Cloud Sync Completed Successfully for ${p.user_name}!`);
-                    temporaryAuthToken = null; // Clear volatile memory token after confirmation
+                    logMessage(`[Stage 3: Cloud Audit] 🟢 SUCCESS! Token verified against DynamoDB.`);
+                    logMessage(`✨ [COMPLETE] Authentication & Cloud Sync successfully finished for ${p.user_name}!`);
+                    temporaryAuthToken = null; // Clear volatile memory token after verification
                 } else {
-                    logMessage(`[Stage 3: Cloud Audit] MISMATCH! Stored token does not match generated token.`);
-                    alert(`Warning: Cloud sync audit mismatch detected.`);
+                    logMessage(`[Stage 3: Cloud Audit] 🔴 MISMATCH! Stored token does not match generated token.`);
                 }
             } catch (err) {
-                logMessage(`[Stage 3: Cloud Audit] Error during verification: ${err.message}`);
+                logMessage(`[Stage 3: Cloud Audit] 🔴 Error during verification: ${err.message}`);
+            } finally {
+                pendingAuditProfile = null;
             }
         }
 
