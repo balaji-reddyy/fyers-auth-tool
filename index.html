@@ -68,7 +68,7 @@
         <!-- Output Log Box -->
         <div class="space-y-1">
             <label class="block text-xs font-medium text-slate-400">Execution Status / Token Output</label>
-            <pre id="outputLog" class="w-full bg-black/60 border border-slate-700 rounded-lg p-3 text-xs font-mono text-green-400 h-36 overflow-y-auto whitespace-pre-wrap"></pre>
+            <pre id="outputLog" class="w-full bg-black/60 border border-slate-700 rounded-lg p-3 text-xs font-mono text-green-400 h-44 overflow-y-auto whitespace-pre-wrap"></pre>
         </div>
     </div>
 
@@ -271,9 +271,12 @@
                 const data = await response.json();
                 
                 if (data.s === "ok" || data.access_token) {
-                    const accessToken = data.access_token;
-                    temporaryAuthToken = accessToken.trim();
-                    logMessage(`[Stage 1: Fyers Auth] 🟢 SUCCESS for ${p.user_name}!\nToken: ${accessToken.substring(0, 10)}...${accessToken.substring(accessToken.length - 4)}`);
+                    const accessToken = data.access_token.trim();
+                    temporaryAuthToken = accessToken;
+                    
+                    // Detailed diagnostic log
+                    logMessage(`[Stage 1: Fyers Auth] 🟢 SUCCESS for ${p.user_name}`);
+                    logMessage(`   ↳ Generated Token: ${accessToken}`);
 
                     const syncCheck = document.getElementById('syncCloudCheck');
                     if (syncCheck && syncCheck.checked) {
@@ -300,8 +303,10 @@
             logMessage("[Stage 2] Pushing token to Cloud Gateway (Opaque Request)...");
             const payload = {
                 userid: p.user_name,
-                authCode: accessToken
+                auth_token: accessToken
             };
+
+            logMessage(`   ↳ Pushing Payload to ${syncUrl}: ${JSON.stringify(payload)}`);
 
             try {
                 await fetch(syncUrl, {
@@ -353,6 +358,7 @@
             const auditUrl = `${PROFILES_API_URL}?passcode=${encodeURIComponent(passcode)}&req_type=audit&user_name=${encodeURIComponent(p.user_name)}`;
 
             logMessage("[Stage 3] Executing Audit Verification against DynamoDB...");
+            logMessage(`   ↳ Querying Audit URL: ${auditUrl}`);
 
             try {
                 const res = await fetch(auditUrl, {
@@ -363,7 +369,11 @@
                 if (!res.ok) throw new Error(`Audit server returned status ${res.status}`);
 
                 const auditData = await res.json();
+                logMessage(`   ↳ Raw Audit Response from DB: ${JSON.stringify(auditData)}`);
+
                 const storedToken = auditData.stored_token ? auditData.stored_token.trim() : "";
+                logMessage(`   ↳ Compared Stored Token: ${storedToken}`);
+                logMessage(`   ↳ Expected Generated Token: ${expectedToken}`);
 
                 if (storedToken === expectedToken) {
                     logMessage(`[Stage 3: Cloud Audit] 🟢 SUCCESS! Token verified against DynamoDB.`);
