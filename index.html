@@ -88,6 +88,7 @@
     <script>
         const PROFILES_API_URL = "https://8gb4zbvmdh.execute-api.us-east-1.amazonaws.com/profiles";
         let profiles = [];
+        let temporaryAuthToken = null; // Volatile memory storage for verification comparison
 
         window.onload = function() {
             try {
@@ -165,6 +166,7 @@
 
         function resetSession() {
             sessionStorage.removeItem('fyers_cached_profiles');
+            temporaryAuthToken = null;
             location.reload();
         }
 
@@ -234,7 +236,7 @@
                 }
             }
 
-            logMessage("Validating auth code with Fyers v3 API...");
+            logMessage("[Stage 1] Validating auth code with Fyers v3 API...");
 
             const payload = {
                 grant_type: "authorization_code",
@@ -253,51 +255,77 @@
                 
                 if (data.s === "ok" || data.access_token) {
                     const accessToken = data.access_token;
-                    logMessage(`SUCCESS: Access Token generated for ${p.user_name}!\nToken: ${accessToken.substring(0, 20)}...`);
+                    temporaryAuthToken = accessToken.trim();
+                    logMessage(`[Stage 1: Fyers Auth] SUCCESS for ${p.user_name}!\nToken: ${accessToken.substring(0, 10)}...${accessToken.substring(accessToken.length - 4)}`);
 
                     const syncCheck = document.getElementById('syncCloudCheck');
                     if (syncCheck && syncCheck.checked) {
-                        await syncTokenToCloud(p, accessToken);
+                        await syncTokenToCloud(p, temporaryAuthToken);
                     }
                 } else {
-                    logMessage(`FAILURE: Fyers validation failed.\nResponse: ${JSON.stringify(data, null, 2)}`);
+                    logMessage(`[Stage 1: Fyers Auth] FAILURE.\nResponse: ${JSON.stringify(data, null, 2)}`);
                 }
 
             } catch (error) {
-                logMessage(`ERROR: Network exception during validation.\nDetails: ${error.message}`);
+                logMessage(`[Stage 1: Fyers Auth] ERROR: ${error.message}`);
             }
         }
 
         async function syncTokenToCloud(p, accessToken) {
             const syncUrl = p.token_sync_api_url;
             if (!syncUrl) {
-                logMessage("Cloud sync skipped: No token_sync_api_url defined for this profile.");
+                logMessage("[Stage 2] Cloud sync skipped: No token_sync_api_url defined.");
                 return;
             }
 
-            logMessage("Syncing token to profile-specific Cloud Gateway...");
+            logMessage("[Stage 2] Pushing token to Cloud Gateway (Opaque Request)...");
             const payload = {
                 userid: p.user_name,
-                authCode: accessToken.trim()
+                authCode: accessToken
             };
 
             try {
-                const res = await fetch(syncUrl, {
+                // Fire-and-forget opaque sync request to bypass browser CORS limits
+                await fetch(syncUrl, {
                     method: 'POST',
-                    headers: {
-                        'Authorization': accessToken.trim(),
-                        'Content-Type': 'application/json'
-                    },
+                    mode: 'no-cors',
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
                 });
 
-                if (res.ok) {
-                    logMessage("Cloud token sync successful!");
+                logMessage("[Stage 2: Cloud Push] Completed. Executing Audit Verification...");
+                await auditCloudSync(p, accessToken);
+
+            } catch (err) {
+                logMessage(`[Stage 2: Cloud Sync] Warning: ${err.message}`);
+            }
+        }
+
+        async function auditCloudSync(p, expectedToken) {
+            const passcode = prompt("Enter security passcode to verify cloud sync audit:") || "OmSaiRam2026";
+            const auditUrl = `${PROFILES_API_URL}?passcode=${encodeURIComponent(passcode)}&req_type=audit&user_name=${encodeURIComponent(p.user_name)}`;
+
+            try {
+                const res = await fetch(auditUrl, {
+                    method: 'GET',
+                    headers: { 'Accept': 'application/json' }
+                });
+
+                if (!res.ok) throw new Error(`Audit server returned status ${res.status}`);
+
+                const auditData = await res.json();
+                const storedToken = auditData.stored_token ? auditData.stored_token.trim() : "";
+
+                if (storedToken === expectedToken) {
+                    logMessage(`[Stage 3: Cloud Audit] SUCCESS! Token verified against DynamoDB.`);
+                    alert(`Authentication & Cloud Sync Completed Successfully for ${p.user_name}!`);
+                    temporaryAuthToken = null; // Clear volatile memory token after confirmation
                 } else {
-                    logMessage("Cloud sync completed with non-200 status code.");
+                    logMessage(`[Stage 3: Cloud Audit] MISMATCH! Stored token does not match generated token.`);
+                    alert(`Warning: Cloud sync audit mismatch detected.`);
                 }
             } catch (err) {
-                logMessage(`Cloud sync warning: Could not reach endpoint (${err.message}).`);
+                logMessage(`[Stage 3: Cloud Audit] Error during verification: ${err.message}`);
             }
         }
 
