@@ -31,10 +31,10 @@
                 </select>
             </div>
 
-            <!-- Profile details display -->
+            <!-- Profile details display (Masked App ID & Hash ID) -->
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs bg-slate-900/50 p-3 rounded-lg border border-slate-700/50">
-                <div><span class="text-slate-400">App ID:</span> <span id="lblClientId" class="font-mono text-orange-300">-</span></div>
-                <div><span class="text-slate-400">App Hash ID:</span> <span id="lblHashId" class="font-mono text-orange-300">-</span></div>
+                <div><span class="text-slate-400">App ID:</span> <span id="lblClientId" class="font-mono text-orange-300">****</span></div>
+                <div><span class="text-slate-400">App Hash ID:</span> <span id="lblHashId" class="font-mono text-orange-300">****</span></div>
                 <div class="sm:col-span-2 truncate"><span class="text-slate-400">Redirect URL:</span> <span id="lblRedirectUrl" class="font-mono text-slate-300">-</span></div>
             </div>
 
@@ -176,7 +176,8 @@
             profiles.forEach((p, index) => {
                 const opt = document.createElement('option');
                 opt.value = index;
-                opt.textContent = (p.user_name || 'User') + ' (' + (p.app_id || '') + ')';
+                // Mask app_id in dropdown text display as well for maximum security
+                opt.textContent = (p.user_name || 'User') + ' (****)';
                 select.appendChild(opt);
             });
         }
@@ -197,16 +198,17 @@
             const redirectLbl = document.getElementById('lblRedirectUrl');
 
             if (idx === "") {
-                if (clientLbl) clientLbl.textContent = "-";
-                if (hashLbl) hashLbl.textContent = "-";
+                if (clientLbl) clientLbl.textContent = "****";
+                if (hashLbl) hashLbl.textContent = "****";
                 if (redirectLbl) redirectLbl.textContent = "-";
                 return;
             }
             
             const p = profiles[idx];
             if (p) {
-                if (clientLbl) clientLbl.textContent = p.app_id || '-';
-                if (hashLbl) hashLbl.textContent = p.hash_id || '-';
+                // Mock display values to prevent sensitive data exposure
+                if (clientLbl) clientLbl.textContent = "****";
+                if (hashLbl) hashLbl.textContent = "****";
                 if (redirectLbl) redirectLbl.textContent = p.redirect_url || '-';
             }
         }
@@ -275,7 +277,7 @@
                     temporaryAuthToken = accessToken;
                     
                     logMessage(`[Stage 1: Fyers Auth] 🟢 SUCCESS for ${p.user_name}`);
-                    logMessage(`   ↳ Generated Token: ${accessToken}`);
+                    logMessage(`   ↳ Generated Token: ${accessToken.substring(0, 10)}...${accessToken.substring(accessToken.length - 4)}`);
 
                     const syncCheck = document.getElementById('syncCloudCheck');
                     if (syncCheck && syncCheck.checked) {
@@ -301,13 +303,12 @@
 
             logMessage("[Stage 2] Pushing token to Cloud Gateway (Opaque Request)...");
             
-            // Updated payload to use 'authCode' matching legacy Java application structure
             const payload = {
                 userid: p.user_name,
                 authCode: accessToken
             };
 
-            logMessage(`   ↳ Pushing Payload to ${syncUrl}: ${JSON.stringify(payload)}`);
+            logMessage(`   ↳ Pushing Payload to Cloud Gateway for ${p.user_name}`);
 
             try {
                 await fetch(syncUrl, {
@@ -361,7 +362,6 @@
             const auditUrl = `${PROFILES_API_URL}?passcode=${encodeURIComponent(passcode)}&req_type=audit&user_name=${encodeURIComponent(p.user_name)}`;
 
             logMessage("[Stage 3] Executing Audit Verification against DynamoDB...");
-            logMessage(`   ↳ Querying Audit URL: ${auditUrl}`);
 
             try {
                 const res = await fetch(auditUrl, {
@@ -372,11 +372,7 @@
                 if (!res.ok) throw new Error(`Audit server returned status ${res.status}`);
 
                 const auditData = await res.json();
-                logMessage(`   ↳ Raw Audit Response from DB: ${JSON.stringify(auditData)}`);
-
                 const storedToken = auditData.stored_token ? auditData.stored_token.trim() : "";
-                logMessage(`   ↳ Compared Stored Token: ${storedToken}`);
-                logMessage(`   ↳ Expected Generated Token: ${expectedToken}`);
 
                 if (storedToken === expectedToken) {
                     logMessage(`[Stage 3: Cloud Audit] 🟢 SUCCESS! Token verified against DynamoDB.`);
